@@ -1,0 +1,146 @@
+---
+title: "Dados do CAGED indicam crescimento mais forte em 2020"
+author: "Vítor Wilher, Mestre em Economia e Cientista de Dados"
+date: "10 de dezembro de 2019"
+abstract: "Nesse comentário, discutimos novamente a relação entre o CAGED e o crescimento da economia"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: true
+    includes:
+      in_header: header.tex
+geometry: margin=1in
+fontfamily: mathpazo
+fontsize: 11pt
+bibliography: 'references.bib'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  ifelse(options$size != "normalsize", paste0("\\", options$size,"\n\n", x, "\n\n \\normalsize"), x)
+})
+
+```
+
+\newpage
+# Pacotes
+
+```{r, echo=T, eval=T, results='asis', fig.width=8, fig.height=4, fig.align='center', out.width="1\\linewidth", warning=FALSE, message=FALSE, size='small'}
+
+## Pacotes
+library(ecoseries)
+library(sidrar)
+library(xts)
+library(ggplot2)
+library(scales)
+library(BMR)
+### Pacote Seasonal
+library(seasonal)
+Sys.setenv(X13_PATH = "C:/Séries Temporais/R/Pacotes/seas/x13ashtml")
+#checkX13()
+
+
+```
+
+# Introdução 
+
+Os dados do Cadastro Geral de Empregados e Desempregados (CAGED) divulgados pelo Ministério da Economia mostram que o fluxo de emprego líquido formal se acelerou ao longo de 2019. O saldo dessazonalizado saiu de uma média de 32 mil empregos líquidos no 1º trimestre para 48 mil no terceiro. Dada a relação existente entre o saldo do CAGED e o crescimento do PIB, como mostro na Edição 58 do Clube do Código, espera-se que essa aceleração vista no CAGED tenha efeito sobre o crescimento econômico. Para ilustrar, abaixo nós coletamos os dados do PIB e do saldo do CAGED.
+
+# Baixando e tratando os dados
+
+```{r, echo=T, eval=T, results='asis', fig.width=8, fig.height=4, fig.align='center', out.width="1\\linewidth", warning=FALSE, message=FALSE, size='small'}
+
+## Baixar dados
+caged = ts(series_ipeadata('272844966',
+                           periodicity = 'M')$serie_272844966$valor,
+                start=c(1999,05), freq=12)
+
+tabela = get_sidra(api='/t/1620/n1/all/v/all/p/all/c11255/90707/d/v583%202')
+pib = ts(tabela$Valor, start=c(1996,01), freq=4)
+
+## Dessazonalizar Caged
+cagedsa <- final(seas(caged))
+
+## Criar variação anual
+anual <- (((pib+lag(pib,-1)+lag(pib,-2)+lag(pib,-3))/4)/
+            ((lag(pib,-4)+lag(pib,-5)+lag(pib,-6)+lag(pib,-7))/4)-1)*100
+
+
+## Trimestralizar Caged
+dates = seq(as.Date('1999-07-01'), as.Date('2019-09-01'),
+            by='1 month')
+caged = window(cagedsa, start=c(1999,07), end=c(2019,09))
+caged = data.frame(dates=dates, caged=caged)
+caged = xts(caged$caged, order.by = caged$dates)
+caged = apply.quarterly(caged, FUN=mean)
+caged = caged[-1]
+
+## Acertar vetor de datas do PIB
+pib = window(anual, start=c(1999,4))
+pib = data.frame(dates=as.Date(time(caged)), pib=pib)
+pib = xts(pib$pib, order.by = index(caged))
+
+```
+
+O saldo do CAGED é mensal enquanto o PIB é uma série trimestral. Assim, precisaremos fazer alguns ajustes nas séries. O código abaixo implementa. Uma vez que os dados estejam tratados, podemos criar gráficos como abaixo.
+
+# Visualizando os dados
+
+```{r, echo=T, eval=T, results='asis', fig.width=8, fig.height=4, fig.align='center', out.width="1\\linewidth", warning=FALSE, message=FALSE, size='small'}
+
+## Gráficos
+data = cbind(caged/1000, pib)
+colnames(data) = c('Saldo CAGED', 'Crescimento PIB')
+
+autoplot(data)+facet_free()+
+  xlab('')+
+  geom_line(size=.8, colour='black')+
+  scale_x_date(breaks = date_breaks("2 years"),
+               labels = date_format("%Y"))+
+  labs(title='Saldo CAGED Dessazonalizado vs. Crescimento do PIB',
+       caption='Fonte: analisemacro.com.br')
+
+```
+
+```{r, echo=T, eval=T, results='asis', fig.width=8, fig.height=4, fig.align='center', out.width="1\\linewidth", warning=FALSE, message=FALSE, size='small'}
+
+ggplot(data, aes(data[,2], data[,1]))+
+  geom_point(stat='identity', colour='black', size=3,
+             shape=21, fill='orange')+
+  geom_smooth(method='lm', colour='black')+
+  xlab('Crescimento do PIB')+ylab('Saldo CAGED Dessazonalizado')+
+  labs(title='Saldo CAGED Dessazonalizado vs. Crescimento do PIB')+
+  theme_bw()
+
+
+
+```
+
+```{r, echo=T, eval=T, results='asis', fig.width=8, fig.height=4, fig.align='center', out.width="1\\linewidth", warning=FALSE, message=FALSE, size='small'}
+
+df = data.frame(time=as.Date(time(caged)), caged=caged/1000,
+                pib=pib)
+df2 = transform(df, time = as.yearqtr(time))
+
+ggplot(df2, aes(x=time))+
+  geom_bar(aes(y=caged, colour='Empregos Formais'), 
+           stat='identity', fill="#9999CC", width=.1)+
+  geom_line(aes(y=pib*30, colour='Crescimento do PIB'), size=.8)+
+  geom_hline(yintercept=0, colour='black')+
+  scale_y_continuous(sec.axis = sec_axis(~./30, name='Crescimento do PIB (% a.a.)'))+
+  scale_colour_manual('',
+                      values=c('red', '#9999CC'))+
+  theme(legend.position = c(.2,.2))+
+  xlab('')+ylab('Empregos Formais (mil pessoas)')+
+  scale_x_yearqtr(format = "%YQ%q", n=28)+
+  theme(axis.text.x=element_text(angle=45, hjust=1))+
+  labs(title='Empregos Formais vs. Crescimento do PIB',
+       caption='Fonte: analisemacro.com.br com dados do IBGE e do CAGED.')
+
+
+```
+
+A elevada correlação entre as séries também implica em uma causalidade, no sentido do saldo do CAGED para o  crescimento do PIB. Em outras palavras, o maior emprego líquido formal vai gerar maior crescimento econômico nos próximos trimestres. Na margem, isso já foi sentido, inclusive, com o número acima do esperado no 3º tri. Isso deve ser visto nas métricas mais suavizadas daqui para frente.
